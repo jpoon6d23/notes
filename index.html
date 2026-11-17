@@ -1,0 +1,1690 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="筆記">
+<meta name="robots" content="noindex">
+<title>我嘅筆記</title>
+<style>
+/* Layout: sticky toolbar with 筆記/待辦 tabs. 筆記 = one editable column of line blocks; heading lines are big, upper-case, gold-banded; their names float in a card on the right (wide) or a row of chips under the toolbar (phone). 待辦 = Eisenhower 2×2. Data lives in this browser and syncs to a private GitHub repo. */
+:root{
+  --bg:#0f1115; --panel:#171b22; --panel2:#1e232c; --line:#262c36; --text:#e9ebef; --muted:#8a93a3; --faint:#5d6574;
+  --accent:#f5c451; --accent-ink:#1d1600;
+  --accent-band:rgba(245,196,81,.14); --accent-flash:rgba(245,196,81,.42); --accent-glow:rgba(245,196,81,.07);
+  --ok:#4cc38a; --warn:#f0a050; --bad:#ef6b6b; --blue:#7fa8e6;
+  --toph:64px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang HK","Noto Sans HK","Microsoft JhengHei","Segoe UI",sans-serif}
+body{min-height:100vh}
+
+/* ---------- toolbar ---------- */
+.top{position:sticky;top:0;z-index:20;background:var(--bg);padding-bottom:1px}
+header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;flex:none;gap:2px;padding:3px;background:var(--panel);border:1px solid var(--line);border-radius:11px}
+.tabs button{border:0;background:transparent;color:var(--muted);padding:6px 14px;border-radius:8px;font-size:14px}
+.tabs button[aria-selected="true"]{background:var(--line);color:var(--text);font-weight:600}
+button.status{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);flex:1 1 0;min-width:0;
+  background:transparent;border:0;padding:6px 4px;text-align:left;border-radius:8px}
+button.status:hover{color:var(--text)}
+button.status:active{transform:none}
+.status span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--muted);transition:background .2s}
+.status[data-s="saved"] .dot{background:var(--ok)}
+.status[data-s="saving"] .dot,.status[data-s="dirty"] .dot{background:var(--accent)}
+.status[data-s="offline"] .dot,.status[data-s="local"] .dot{background:var(--warn)}
+.status[data-s="error"] .dot{background:var(--bad)}
+.tools{display:flex;align-items:center;gap:6px;flex:none}
+body[data-tab="todo"] .notes-only{display:none!important}
+body[data-tab="notes"] .todo-only{display:none!important}
+
+button{font:inherit;font-size:14px;color:var(--text);background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:8px 13px;cursor:pointer;-webkit-tap-highlight-color:transparent;flex:none}
+button:active{transform:scale(.97)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button.icon{padding:7px 9px;line-height:0}
+button.icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+button.icon .lbl{display:none}
+@media (min-width:720px){
+  button.icon.wl{display:flex;align-items:center;gap:6px;line-height:1;padding:7px 11px 7px 9px}
+  button.icon.wl .lbl{display:inline}
+}
+button:disabled{opacity:.35;cursor:default}
+button:disabled:active{transform:none}
+
+.banner{display:none;flex-direction:column;gap:10px;margin:10px 14px 0;padding:12px 14px;border-radius:12px;
+  background:#2a2112;border:1px solid #5a4520;font-size:14px;line-height:1.5}
+.banner.show{display:flex}
+.banner .row{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------- notes ---------- */
+#notesView{display:block}
+.ed{display:block;position:relative;min-height:calc(100vh - var(--toph));outline:0;caret-color:var(--accent);
+  font-size:17px;line-height:1.7;white-space:pre-wrap;overflow-wrap:break-word;
+  padding:18px max(18px, calc((100% - 820px) / 2)) 35vh}
+.ed > div{position:relative}
+.ed > .h{font-size:1.32em;line-height:1.45;font-weight:650;text-transform:uppercase;letter-spacing:.03em;
+  margin:10px -12px 6px;padding:4px 12px;border-radius:8px;background:var(--accent-band)}
+.ed > .h::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--accent)}
+.ed > .flash{animation:flash 1.5s ease-out}
+@keyframes flash{0%{background:var(--accent-flash)}100%{background:var(--accent-band)}}
+.ed.empty::after{content:attr(data-ph);position:absolute;top:18px;left:max(18px, calc((100% - 820px) / 2));right:max(18px, calc((100% - 820px) / 2));
+  color:var(--faint);pointer-events:none;white-space:pre-wrap}
+
+/* contents — words you can tap */
+.toc-i{display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:6px 10px;color:var(--muted);
+  font-size:13.5px;line-height:1.35;text-transform:uppercase;letter-spacing:.03em;overflow-wrap:anywhere}
+.toc-i:hover{color:var(--text);background:var(--panel2)}
+.toc-i.on{color:var(--accent);background:var(--panel2);font-weight:600}
+.toc-i:active{transform:none}
+.toccard{display:none;position:fixed;z-index:4;right:16px;top:calc(var(--toph) + 24px);width:220px;
+  max-height:calc(100vh - var(--toph) - 48px);overflow-y:auto;padding:8px 6px;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 34px -18px rgba(0,0,0,.7)}
+.toccard ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.tocbar{display:flex;gap:6px;overflow-x:auto;padding:8px 14px;border-bottom:1px solid var(--line);scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.tocbar::-webkit-scrollbar{display:none}
+.tocbar .toc-i{flex:none;width:auto;white-space:nowrap;padding:5px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:12.5px}
+.tocbar .toc-i.on{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
+@media (min-width:760px){
+  .tocbar{display:none!important}
+  body.has-toc[data-tab="notes"] .toccard{display:block}
+  body.has-toc[data-tab="notes"] #notesView{margin-right:250px}
+}
+@media (min-width:1420px){ body.has-toc[data-tab="notes"] #notesView{margin-right:0} }
+
+/* ---------- to-do matrix ---------- */
+#todoView{padding:16px max(16px, calc((100% - 1180px) / 2)) 48px}
+.matrix{display:grid;grid-template-columns:22px minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto auto auto;gap:10px}
+.ax{color:var(--muted);font-size:12px;letter-spacing:.12em}
+.ax-top{grid-column:2 / 4;grid-row:1;display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center}
+.ax-left{grid-column:1;grid-row:2 / 4;display:grid;grid-template-rows:1fr 1fr;gap:10px}
+.ax-left span{writing-mode:vertical-rl;align-self:center;justify-self:center}
+.quad{min-width:0;display:flex;flex-direction:column;gap:8px;min-height:230px;padding:14px 12px 12px;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;transition:border-color .15s, box-shadow .15s}
+.q-do{grid-column:2;grid-row:2}
+.q-plan{grid-column:3;grid-row:2}
+.q-out{grid-column:2;grid-row:3}
+.q-drop{grid-column:3;grid-row:3;background:transparent;border-style:dashed}
+.qhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;padding:0 4px}
+.qhead h2{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}
+.q-do h2{color:var(--bad)}
+.q-plan h2{color:var(--accent)}
+.q-out h2{color:var(--blue)}
+.q-drop h2{color:var(--muted)}
+.sub{font-size:12.5px;color:var(--muted)}
+.n{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.quad.hot{border:1.5px solid var(--accent);
+  background:linear-gradient(180deg, rgba(245,196,81,.11), rgba(245,196,81,.025) 55%), var(--panel);
+  box-shadow:0 0 0 4px var(--accent-glow), 0 14px 34px -16px rgba(245,196,81,.35)}
+.badge{font-size:11px;font-weight:700;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:2px 8px;letter-spacing:.02em}
+.quad.over{border-color:var(--muted);border-style:solid}
+.quad.hot.over{border-color:var(--accent)}
+
+.items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.items.drop-end::after{content:"";display:block;height:2px;margin:3px 6px;border-radius:2px;background:var(--accent)}
+.it{position:relative;display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;padding:6px;border-radius:9px}
+.fine .it:hover{background:rgba(255,255,255,.035)}
+.it.sel,.fine .it.sel:hover{background:var(--panel2)}
+.it.dragging{opacity:.35}
+.it.drop-before::before{content:"";position:absolute;left:6px;right:6px;top:-2px;height:2px;border-radius:2px;background:var(--accent)}
+.grip{display:none}
+.fine .grip{display:block;flex:none;width:10px;height:20px;margin:1px -5px 0 -3px;cursor:grab;color:var(--faint);opacity:0;transition:opacity .12s}
+.fine .it:hover .grip{opacity:1}
+.grip svg{width:10px;height:20px;fill:currentColor}
+.ck{flex:none;width:20px;height:20px;margin-top:1px;padding:0;border-radius:50%;border:1.5px solid var(--faint);background:transparent;
+  display:grid;place-items:center}
+.ck svg{width:12px;height:12px;stroke:var(--bg);stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.ck[aria-checked="true"]{background:var(--ok);border-color:var(--ok)}
+.ck[aria-checked="true"] svg{opacity:1}
+.q-plan .ck{border-color:rgba(245,196,81,.55)}
+.q-plan .ck[aria-checked="true"]{border-color:var(--ok)}
+.bd{flex:1;min-width:0}
+.tx{outline:0;font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;cursor:text;min-height:1.45em}
+.q-drop .tx{color:var(--muted)}
+.it.done .tx{text-decoration:line-through;color:var(--faint)}
+.age{font-size:11.5px;color:var(--faint);margin-top:2px;font-variant-numeric:tabular-nums}
+.age.old{color:var(--warn)}
+.x{display:none}
+.fine .x{display:grid;place-items:center;flex:none;width:24px;height:24px;margin:-1px -2px 0 0;padding:0;border:0;border-radius:7px;
+  background:transparent;color:var(--faint);opacity:0;transition:opacity .1s}
+.fine .x svg{width:14px;height:14px;stroke:currentColor;stroke-width:2.2;fill:none;stroke-linecap:round}
+.fine .it:hover .x,.fine .x:focus-visible{opacity:1}
+.fine .x:hover{color:var(--bad);background:rgba(239,107,107,.12)}
+.acts{display:none;flex-basis:100%;flex-wrap:wrap;align-items:center;gap:5px;padding-left:28px}
+.it.sel .acts{display:flex}
+.acts .l{font-size:12px;color:var(--faint);margin-right:2px}
+.acts button{font-size:12.5px;padding:4px 9px;border-radius:7px;background:var(--bg)}
+.acts .del{color:var(--bad);margin-left:auto}
+.fine .acts .del{display:none}
+.done{font-size:13px;color:var(--muted)}
+.done summary{cursor:pointer;list-style:none;padding:4px 6px;border-radius:7px;user-select:none;-webkit-user-select:none}
+.done summary::-webkit-details-marker{display:none}
+.done summary::before{content:"▸ "}
+.done[open] summary::before{content:"▾ "}
+.clear{font-size:12px;padding:4px 9px;margin:4px 0 2px 6px;color:var(--muted)}
+.add{margin-top:auto}
+.add input{display:block;width:100%;font:inherit;font-size:15px;color:var(--text);background:transparent;border:1px dashed var(--line);
+  border-radius:9px;padding:8px 10px;outline:0}
+.add input::placeholder{color:var(--faint)}
+.add input:focus{border-style:solid;border-color:var(--muted);background:var(--bg)}
+.q-plan .add input{border-color:rgba(245,196,81,.35)}
+.q-plan .add input:focus{border-color:var(--accent)}
+@media (pointer:coarse){ .tx,.add input{font-size:16px} }
+@media (max-width:600px){
+  .matrix{grid-template-columns:16px minmax(0,1fr) minmax(0,1fr);gap:6px}
+  .ax-top,.ax-left{gap:6px}
+  .ax{font-size:11px;letter-spacing:.06em}
+  .quad{min-height:170px;padding:10px 7px 8px;border-radius:12px;gap:6px}
+  .qhead{padding:0 2px}
+  .qhead h2{font-size:16px}
+  .it{padding:5px 3px;gap:6px}
+  .acts{padding-left:0}
+  .add input{padding:7px 8px}
+}
+
+/* ---------- voice note ---------- */
+#micBtn.rec{color:var(--bad);border-color:rgba(239,107,107,.5);background:rgba(239,107,107,.1)}
+.vpanel{position:fixed;z-index:25;left:50%;transform:translateX(-50%);bottom:var(--vb, 0px);width:min(720px, 100%);
+  display:flex;flex-direction:column;gap:10px;padding:14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background:var(--panel);border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;box-shadow:0 -18px 44px -14px rgba(0,0,0,.7)}
+.vhead{display:flex;align-items:center;gap:10px;font-size:14px}
+.vdot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--faint)}
+.vpanel[data-s="listening"] .vdot{background:var(--bad);animation:pulse 1.2s ease-in-out infinite}
+.vpanel[data-s="starting"] .vdot{background:var(--accent)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.vstate{font-weight:600}
+.vtime{color:var(--muted);font-variant-numeric:tabular-nums}
+.vhead select{margin-left:auto;font:inherit;font-size:13px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.vhead .icon{padding:5px 7px}
+#vText{display:block;width:100%;min-height:110px;max-height:34vh;resize:vertical;font:inherit;font-size:16px;line-height:1.6;color:var(--text);
+  background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;outline:0}
+#vText:focus{border-color:var(--muted)}
+#vText::placeholder{color:var(--faint)}
+.vpartial{min-height:1.4em;font-size:14px;color:var(--faint);font-style:italic;overflow-wrap:anywhere}
+.vmsg{font-size:13px;color:var(--warn);line-height:1.5}
+.vmsg:empty{display:none}
+.vrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.vrow .spacer{flex:1}
+#vRec.on{color:var(--bad);border-color:rgba(239,107,107,.5)}
+@media (prefers-reduced-motion:reduce){ .vpanel[data-s="listening"] .vdot{animation:none} }
+
+/* ---------- sync settings ---------- */
+.modal{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:16px;background:rgba(5,6,8,.66)}
+.mbox{width:min(460px, 100%);max-height:calc(100vh - 32px);overflow-y:auto;display:flex;flex-direction:column;gap:12px;
+  padding:20px 18px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px -20px rgba(0,0,0,.8)}
+.mbox h2{margin:0;font-size:18px}
+.mnote{margin:0;font-size:13.5px;line-height:1.55;color:var(--muted)}
+.mbox label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
+.mbox input{font:inherit;font-size:16px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 11px;outline:0}
+.mbox input:focus{border-color:var(--muted)}
+.mres{font-size:13.5px;line-height:1.5;min-height:1.5em}
+.mres.ok{color:var(--ok)} .mres.bad{color:var(--bad)}
+.mhelp{font-size:13px;color:var(--muted);line-height:1.6}
+.mhelp summary{cursor:pointer;color:var(--text)}
+.mhelp ol{margin:8px 0 0;padding-left:20px}
+.mhelp code{font-size:12.5px;background:var(--bg);padding:1px 5px;border-radius:5px}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:28px;z-index:30;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 32px);
+  transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
+  background:#2b313c;color:var(--text);padding:9px 16px;border-radius:999px;font-size:14px;transition:.2s}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.act{pointer-events:auto;padding:6px 6px 6px 16px}
+.toast button{font-size:13px;padding:5px 12px;border-radius:999px;background:transparent;border-color:#4a5262;color:var(--accent)}
+@media (prefers-reduced-motion:reduce){ .toast,.quad,.grip,.x{transition:none} .ed > .flash{animation:none} }
+</style>
+</head>
+<body data-tab="notes">
+<div class="top" id="top">
+<header>
+  <div class="tabs" role="tablist" aria-label="分頁">
+    <button id="tabNotes" role="tab" type="button" aria-selected="true">筆記</button>
+    <button id="tabTodo" role="tab" type="button" aria-selected="false">待辦</button>
+  </div>
+  <button class="status notes-only" id="status" type="button" data-s="loading" title="同步設定"><i class="dot"></i><span id="statusText">載入中…</span></button>
+  <button class="status todo-only" id="tstatus" type="button" data-s="loading" title="同步設定"><i class="dot"></i><span id="tstatusText">載入中…</span></button>
+  <div class="tools notes-only">
+    <button id="undoBtn" class="icon" type="button" aria-label="還原（Ctrl+Z）" title="還原（Ctrl+Z）" disabled><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button id="redoBtn" class="icon" type="button" aria-label="重做（Ctrl+Y）" title="重做（Ctrl+Y）" disabled><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+    <button id="hBtn" class="icon wl" type="button" aria-label="標題" title="標題"><svg viewBox="0 0 24 24"><path d="M6 5v14M18 5v14M6 12h12"/></svg><span class="lbl">標題</span></button>
+    <button id="micBtn" class="icon wl" type="button" aria-label="錄音做筆記" title="錄音，講完加去筆記最底"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span class="lbl">錄音</span></button>
+  </div>
+</header>
+<div class="banner" id="banner">
+  <div id="bannerText"></div>
+  <div class="row">
+    <button id="keepBoth" class="primary" type="button">兩邊都留</button>
+    <button id="useRemote" type="button">用另一部機嘅</button>
+    <button id="useMine" type="button">用呢部機嘅</button>
+  </div>
+</div>
+<nav class="tocbar notes-only" id="tocBar" aria-label="標題" hidden></nav>
+</div>
+
+<main id="notesView">
+  <div class="ed empty" id="ed" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="筆記"
+       data-ph="寫低你諗到嘅嘢…"><div><br></div></div>
+</main>
+<aside class="toccard" id="tocCard" aria-label="標題"><ul id="tocList"></ul></aside>
+
+<div class="vpanel notes-only" id="vPanel" data-s="idle" role="dialog" aria-label="錄音筆記" hidden>
+  <div class="vhead">
+    <i class="vdot"></i><span class="vstate" id="vState">未開始</span><span class="vtime" id="vTime"></span>
+    <select id="vLang" aria-label="講咩語言">
+      <option value="zh-HK">廣東話</option>
+      <option value="en-GB">English</option>
+    </select>
+    <button id="vClose" class="icon" type="button" aria-label="收起" title="收起（打咗嘅字會留低）"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <textarea id="vText" spellcheck="false"></textarea>
+  <div class="vpartial" id="vPartial"></div>
+  <div class="vmsg" id="vMsg"></div>
+  <div class="vrow">
+    <button id="vRec" type="button">● 錄音</button>
+    <button id="vClear" type="button">清空</button>
+    <i class="spacer"></i>
+    <button id="vDone" class="primary" type="button">完成 · 加落筆記</button>
+  </div>
+</div>
+
+<section id="todoView" hidden>
+  <div class="matrix">
+    <div class="ax ax-top" aria-hidden="true"><span>緊急</span><span>唔緊急</span></div>
+    <div class="ax ax-left" aria-hidden="true"><span>重要</span><span>唔重要</span></div>
+
+    <div class="quad q-do" id="q-do" data-q="do">
+      <div class="qhead"><h2>Do</h2><span class="sub">而家做</span><span class="n" id="n-do"></span></div>
+      <ul class="items open" id="ul-do"></ul>
+      <details class="done" id="done-do" hidden><summary>已完成 <span id="dn-do"></span></summary><ul class="items" id="dul-do"></ul><button type="button" class="clear" data-clear="do">清走已完成</button></details>
+      <form class="add" data-q="do" autocomplete="off"><input id="add-do" type="text" maxlength="300" placeholder="＋ 加一項" aria-label="加去 Do"></form>
+    </div>
+
+    <div class="quad q-plan hot" id="q-plan" data-q="plan">
+      <div class="qhead"><h2>Plan</h2><span class="sub">排時間做</span><span class="badge">最易漏</span><span class="n" id="n-plan"></span></div>
+      <ul class="items open" id="ul-plan"></ul>
+      <details class="done" id="done-plan" hidden><summary>已完成 <span id="dn-plan"></span></summary><ul class="items" id="dul-plan"></ul><button type="button" class="clear" data-clear="plan">清走已完成</button></details>
+      <form class="add" data-q="plan" autocomplete="off"><input id="add-plan" type="text" maxlength="300" placeholder="＋ 加一項" aria-label="加去 Plan"></form>
+    </div>
+
+    <div class="quad q-out" id="q-out" data-q="out">
+      <div class="qhead"><h2>Outsource</h2><span class="sub">搵人做</span><span class="n" id="n-out"></span></div>
+      <ul class="items open" id="ul-out"></ul>
+      <details class="done" id="done-out" hidden><summary>已完成 <span id="dn-out"></span></summary><ul class="items" id="dul-out"></ul><button type="button" class="clear" data-clear="out">清走已完成</button></details>
+      <form class="add" data-q="out" autocomplete="off"><input id="add-out" type="text" maxlength="300" placeholder="＋ 加一項" aria-label="加去 Outsource"></form>
+    </div>
+
+    <div class="quad q-drop" id="q-drop" data-q="drop">
+      <div class="qhead"><h2>Fuck that</h2><span class="sub">唔做</span><span class="n" id="n-drop"></span></div>
+      <ul class="items open" id="ul-drop"></ul>
+      <details class="done" id="done-drop" hidden><summary>已完成 <span id="dn-drop"></span></summary><ul class="items" id="dul-drop"></ul><button type="button" class="clear" data-clear="drop">清走已完成</button></details>
+      <form class="add" data-q="drop" autocomplete="off"><input id="add-drop" type="text" maxlength="300" placeholder="＋ 加一項" aria-label="加去 Fuck that"></form>
+    </div>
+  </div>
+</section>
+
+<div class="modal" id="setModal" hidden>
+  <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <h2 id="setTitle">同步設定</h2>
+    <p class="mnote">筆記同待辦會存喺你 GitHub 一個 private repo，每部機（電腦、iPhone）都要入一次。未設定嘅話，就只會存喺呢部機。</p>
+    <label>GitHub 帳戶<input id="ghOwner" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label>Repo<input id="ghRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label>Token<input id="ghToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…"></label>
+    <div class="mres" id="ghRes"></div>
+    <div class="vrow">
+      <button id="ghOff" type="button">停用同步</button>
+      <i class="spacer"></i>
+      <button id="ghCancel" type="button">取消</button>
+      <button id="ghSave" class="primary" type="button">連線</button>
+    </div>
+    <details class="mhelp">
+      <summary>點樣整 token</summary>
+      <ol>
+        <li>GitHub → 右上角頭像 → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token。</li>
+        <li>Repository access 揀 <b>Only select repositories</b>，只揀放筆記嗰個 repo（例如 <code>notes-data</code>）。</li>
+        <li>Permissions → Repository permissions → <b>Contents: Read and write</b>，其他唔使郁。</li>
+        <li>Expiration 揀長啲（例如 1 年），整好之後複製個 token 貼落上面。</li>
+      </ol>
+    </details>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"><span id="toastMsg"></span><button id="toastAct" type="button" hidden></button></div>
+
+<script>
+(function(){
+  "use strict";
+  function $(id){ return document.getElementById(id); }
+  var root = document.documentElement;
+  var ua = navigator.userAgent;
+  var IOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  var MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform || ua);
+  function mq(q){ try { return window.matchMedia(q).matches; } catch(e){ return false; } }
+  var FINE = mq("(pointer: fine)");
+  var REDUCE = mq("(prefers-reduced-motion: reduce)");
+  if (FINE) root.classList.add("fine");
+  var KEY_B = MAC ? "⌘B" : "Ctrl+B";
+  var DEVICE = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android 電話" :
+               /Windows/.test(ua) ? "Windows 電腦" : /Macintosh/.test(ua) ? "Mac" : /Linux/.test(ua) ? "電腦" : "另一部機";
+
+  var tab = null;   // "notes" | "todo"
+
+  /* ---------- shared helpers ---------- */
+  function readJSON(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch(e){ return null; } }
+  function writeJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch(e){ return false; } }
+  var toastEl = $("toast"), toastMsg = $("toastMsg"), toastAct = $("toastAct"), toastFn = null;
+  function toast(msg, actLabel, fn){
+    toastMsg.textContent = msg;
+    toastFn = fn || null;
+    toastAct.hidden = !fn;
+    if (fn) toastAct.textContent = actLabel;
+    toastEl.classList.toggle("act", !!fn);
+    toastEl.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ toastEl.classList.remove("show", "act"); toastFn = null; }, fn ? 5000 : 1800);
+  }
+  toastAct.onclick = function(){ var f = toastFn; toastFn = null; clearTimeout(toast._t); toastEl.classList.remove("show", "act"); if (f) f(); };
+  function withTimeout(p, ms){
+    return Promise.race([p, new Promise(function(_, rej){ setTimeout(function(){ rej({ code:"offline" }); }, ms); })]);
+  }
+  function byteSize(t){ try { return new TextEncoder().encode(t).length; } catch(e){ return t.length * 3; } }
+  function pad2(n){ return (n < 10 ? "0" : "") + n; }
+  var WD = ["日","一","二","三","四","五","六"];
+  function stamp(d){ return (d.getMonth()+1) + "月" + d.getDate() + "日（" + WD[d.getDay()] + "）" + pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
+  var topEl = $("top");
+  function topH(){ return topEl.offsetHeight; }
+  function measureTop(){ root.style.setProperty("--toph", topEl.offsetHeight + "px"); }
+  if (window.ResizeObserver) new ResizeObserver(measureTop).observe(topEl);
+  window.addEventListener("resize", measureTop);
+  measureTop();
+
+  /* =====================================================================
+     GitHub sync — two files in a private repo: notes.md and todos.json
+     ===================================================================== */
+  var GH_KEY = "hk-notes-gh-v1";
+  var gh = readJSON(GH_KEY) || {};
+  if (!gh.owner) gh.owner = "jpoon6d23";
+  if (!gh.repo) gh.repo = "notes-data";
+  function synced(){ return !!(gh.owner && gh.repo && gh.token); }
+  function b64enc(s){
+    var bytes = new TextEncoder().encode(s), bin = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  function b64dec(b){
+    var bin = atob(String(b).replace(/\s/g, "")), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(u);
+  }
+  function ghFetch(url, method, body){
+    return withTimeout(fetch(url, {
+      method: method || "GET", cache: "no-store",
+      headers: { "Accept":"application/vnd.github+json", "Authorization":"Bearer " + gh.token, "X-GitHub-Api-Version":"2022-11-28" },
+      body: body ? JSON.stringify(body) : undefined
+    }), 15000).catch(function(e){ throw (e && e.code) ? e : { code:"offline" }; });
+  }
+  function fileUrl(path){ return "https://api.github.com/repos/" + encodeURIComponent(gh.owner) + "/" + encodeURIComponent(gh.repo) + "/contents/" + path; }
+  function getFile(path){
+    return ghFetch(fileUrl(path)).then(function(res){
+      if (res.status === 404) return { exists:false };
+      if (res.status === 401 || res.status === 403) throw { code:"auth" };
+      if (!res.ok) throw { code:"http", status:res.status };
+      return res.json().then(function(j){ return { exists:true, sha:j.sha, text:j.content != null ? b64dec(j.content) : "" }; });
+    });
+  }
+  function putFile(path, text, sha, msg){
+    var body = { message:msg, content:b64enc(text) };
+    if (sha) body.sha = sha;
+    return ghFetch(fileUrl(path), "PUT", body).then(function(res){
+      if (res.status === 409 || res.status === 422) throw { code:"conflict" };
+      if (res.status === 401 || res.status === 403) throw { code:"auth" };
+      if (res.status === 404) throw { code:"norepo" };
+      if (!res.ok) throw { code:"http", status:res.status };
+      return res.json().then(function(j){ return j.content.sha; });
+    });
+  }
+  function errLabel(e){
+    var c = e && e.code;
+    if (c === "auth") return "GitHub 唔俾入 · 撳呢度檢查 token";
+    if (c === "norepo") return "搵唔到 " + gh.repo + " · 撳呢度檢查";
+    return "";
+  }
+  function remember(arr, sha){ arr.push(sha); if (arr.length > 10) arr.shift(); }
+
+  /* =====================================================================
+     筆記 — stored as plain text; a heading is a line that starts with "# "
+     ===================================================================== */
+  var ed = $("ed");
+  var notesView = $("notesView");
+  var statusEl = $("status"), statusText = $("statusText");
+  var banner = $("banner"), bannerText = $("bannerText");
+  try { document.execCommand("defaultParagraphSeparator", false, "div"); } catch(e){}
+  ed.setAttribute("data-ph", "寫低你諗到嘅嘢…\n\n撳上面個 H 掣" + (FINE ? "（或者 " + KEY_B + "）" : "") + "，嗰行就變標題。");
+
+  var CACHE_KEY = "hk-notes-cache-v1";
+  var LIMIT = 900 * 1024;
+  var baseSha = null, dirty = false, saving = false, queued = false, conflict = null, loaded = false;
+  var saveTimer = null, cacheTimer = null, retryMs = 2000, myShas = [];
+  var val = "";
+  var composing = false, lastSel = null;
+
+  var LABELS = { loading:"載入中…", saved:"已同步", saving:"儲存中…", dirty:"未存",
+                 offline:"連唔到 · 照寫，連返會自動存", local:"只存喺呢部機 · 撳呢度設定同步", error:"出錯" };
+  function setStatus(s, msg){
+    statusEl.dataset.s = s;
+    statusText.textContent = msg || LABELS[s] || "";
+  }
+  function idleStatus(){ setStatus(!synced() ? "local" : dirty ? "dirty" : loaded ? "saved" : "loading"); }
+
+  /* ---- lines <-> DOM ---- */
+  var HRE = /^#{1,3}[ \t ]+/;
+  function parseLines(text){
+    return text.split("\n").map(function(l){
+      var m = HRE.exec(l);
+      return m ? { h:true, t:l.slice(m[0].length) } : { h:false, t:l };
+    });
+  }
+  function lineText(d){ return d.textContent.replace(/ /g, " "); }
+  function isH(d){ return d.className === "h"; }
+  function setLineText(d, s){ d.textContent = s; if (!s) d.appendChild(document.createElement("br")); }
+  function lineEl(L){ var d = document.createElement("div"); if (L.h) d.className = "h"; setLineText(d, L.t); return d; }
+  function serialize(){
+    var k = ed.children, out = new Array(k.length);
+    for (var i = 0; i < k.length; i++) out[i] = (isH(k[i]) ? "# " : "") + lineText(k[i]);
+    return out.join("\n");
+  }
+  function renderLines(L){
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < L.length; i++) frag.appendChild(lineEl(L[i]));
+    if (!L.length) frag.appendChild(lineEl({ h:false, t:"" }));
+    ed.textContent = "";
+    ed.appendChild(frag);
+    val = serialize();
+    ed.classList.toggle("empty", val === "");
+    scheduleDecor();
+  }
+  function renderAll(text){ renderLines(parseLines(text)); }
+
+  /* ---- selection as {line, column} ---- */
+  function idxOf(el){ return Array.prototype.indexOf.call(ed.children, el); }
+  function lineOf(node){
+    if (!node || node === ed || !ed.contains(node)) return null;
+    while (node.parentNode !== ed) node = node.parentNode;
+    return node;
+  }
+  function ptLC(node, off){
+    if (node === ed) {
+      var n = ed.children.length;
+      if (!n) return { l:0, c:0 };
+      if (off >= n) return { l:n - 1, c:lineText(ed.children[n - 1]).length };
+      return { l:off, c:0 };
+    }
+    var line = lineOf(node);
+    if (!line) return null;
+    var r = document.createRange();
+    try { r.setStart(line, 0); r.setEnd(node, off); } catch(e){ return { l:idxOf(line), c:0 }; }
+    return { l:idxOf(line), c:r.toString().length };
+  }
+  function getSel(){
+    var s = window.getSelection();
+    if (!s || !s.rangeCount) return null;
+    var r = s.getRangeAt(0);
+    if (!ed.contains(r.startContainer) || !ed.contains(r.endContainer)) return null;
+    var a = ptLC(r.startContainer, r.startOffset), b = ptLC(r.endContainer, r.endOffset);
+    if (!a || !b) return null;
+    return { sl:a.l, sc:a.c, el:b.l, ec:b.c };
+  }
+  function lcPt(l, c){
+    var k = ed.children;
+    if (!k.length) return { node:ed, off:0 };
+    l = Math.max(0, Math.min(l, k.length - 1));
+    var line = k[l], w = document.createTreeWalker(line, NodeFilter.SHOW_TEXT), n, last = null;
+    while ((n = w.nextNode())) { last = n; if (c <= n.data.length) return { node:n, off:c }; c -= n.data.length; }
+    if (last) return { node:last, off:last.data.length };
+    return { node:line, off:0 };
+  }
+  function setSel(S){
+    if (!S) return;
+    var a = lcPt(S.sl, S.sc), b = lcPt(S.el, S.ec), s = window.getSelection();
+    try { s.setBaseAndExtent(a.node, a.off, b.node, b.off); } catch(e){}
+    lastSel = S;
+  }
+  function caret(l, c){ return { sl:l, sc:c, el:l, ec:c }; }
+  function collapsed(S){ return S && S.sl === S.el && S.sc === S.ec; }
+  function revealLine(l, force){
+    var d = ed.children[l];
+    if (!d) return;
+    var r = d.getBoundingClientRect(), vv = window.visualViewport;
+    var vTop = vv ? vv.offsetTop : 0, vh = vv ? vv.height : window.innerHeight, top = topH();
+    if (force || r.bottom > vTop + vh - 24 || r.top < vTop + top + 8) {
+      if (force) window.scrollTo(0, Math.max(0, window.scrollY + r.top - vTop - vh * 0.35));
+      else if (r.bottom > vTop + vh - 24) window.scrollBy(0, r.bottom - (vTop + vh - 24) + 40);
+      else window.scrollBy(0, r.top - (vTop + top + 8));
+    }
+  }
+  document.addEventListener("selectionchange", function(){
+    if (composing) return;
+    var S = getSel();
+    if (S) lastSel = S;
+  });
+
+  /* ---- repair: whatever the browser did, put it back to one plain <div> per line ---- */
+  var BLOCK = /^(DIV|P|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|SECTION|ARTICLE|HEADER|FOOTER|TABLE|TBODY|TR|TD)$/;
+  var AUTO_H = /^#{1,3}[ \t ]+/;
+  function lineOk(d){
+    if (d.nodeType !== 1 || d.nodeName !== "DIV") return false;
+    var at = d.attributes;
+    if (at.length > 1 || (at.length === 1 && !(at[0].name === "class" && at[0].value === "h"))) return false;
+    var k = d.childNodes, n = k.length, len = 0, br = false;
+    if (!n) return false;
+    for (var i = 0; i < n; i++) {
+      var c = k[i];
+      if (c.nodeType === 3) { if (c.data.indexOf("\n") >= 0) return false; len += c.data.length; continue; }
+      if (c.nodeName === "BR" && i === n - 1) { br = true; continue; }
+      return false;
+    }
+    return len > 0 || br;
+  }
+  function extract(mA, mB){
+    var lines = [], need = true, pos = {};
+    function push(h){ lines.push({ h:h, t:"" }); need = false; }
+    function walk(node, h){
+      for (var c = node.firstChild; c; c = c.nextSibling) {
+        if (c === mA || c === mB) {
+          if (need) push(h);
+          pos[c === mA ? "a" : "b"] = { l:lines.length - 1, c:lines[lines.length - 1].t.length };
+          continue;
+        }
+        if (c.nodeType === 3) {
+          var parts = c.data.replace(/ /g, " ").split("\n");
+          for (var i = 0; i < parts.length; i++) {
+            if (i > 0) { if (need) push(h); need = true; }
+            if (parts[i]) { if (need) push(h); lines[lines.length - 1].t += parts[i]; }
+          }
+        } else if (c.nodeType === 1) {
+          if (c.nodeName === "BR") { if (need) push(h); need = true; }
+          else if (BLOCK.test(c.nodeName)) { need = true; walk(c, h || (node === ed && c.classList.contains("h"))); need = true; }
+          else walk(c, h);
+        }
+      }
+    }
+    walk(ed, false);
+    if (!lines.length) push(false);
+    return { lines:lines, a:pos.a, b:pos.b };
+  }
+  function normalize(){
+    var k = ed.childNodes, bad = !k.length;
+    for (var i = 0; !bad && i < k.length; i++) {
+      var d = k[i];
+      if (!lineOk(d)) bad = true;
+      else if (!isH(d) && d.firstChild.nodeType === 3 && AUTO_H.test(d.firstChild.data)) bad = true;
+    }
+    if (!bad) return false;
+    var s = window.getSelection(), mA = null, mB = null;
+    if (s && s.rangeCount) {
+      var r = s.getRangeAt(0);
+      if (ed.contains(r.startContainer) && ed.contains(r.endContainer)) {
+        try {
+          mB = document.createElement("i"); var re = r.cloneRange(); re.collapse(false); re.insertNode(mB);
+          mA = document.createElement("i"); var rs = r.cloneRange(); rs.collapse(true); rs.insertNode(mA);
+        } catch(x){ mA = mB = null; }
+      }
+    }
+    var ex = extract(mA, mB), L = ex.lines;
+    for (var j = 0; j < L.length; j++) {
+      if (L[j].h) continue;
+      var m = AUTO_H.exec(L[j].t);
+      if (!m) continue;
+      L[j].h = true; L[j].t = L[j].t.slice(m[0].length);
+      [ex.a, ex.b].forEach(function(p){ if (p && p.l === j) p.c = Math.max(0, p.c - m[0].length); });
+    }
+    renderLines(L);
+    if (ex.a && ex.b) setSel({ sl:ex.a.l, sc:ex.a.c, el:ex.b.l, ec:ex.b.c });
+    return true;
+  }
+
+  /* ---- undo / redo (this session) ---- */
+  var hist = [], hi = -1, lastKind = "", lastRec = 0, pendingKind = "big";
+  var undoBtn = $("undoBtn"), redoBtn = $("redoBtn"), hBtn = $("hBtn");
+  function updateBtns(){ undoBtn.disabled = !(hi > 0); redoBtn.disabled = !(hi < hist.length - 1); }
+  function record(kind){
+    var now = Date.now(), st = { t:val, sel:getSel() || lastSel };
+    if (hi >= 0 && hist[hi].t === st.t) { hist[hi].sel = st.sel; return; }
+    hist.length = hi + 1;
+    var merge = hi > 0 && kind === lastKind && (kind === "ins" || kind === "del") && now - lastRec < 1200;
+    if (merge) hist[hi] = st; else { hist.push(st); hi++; }
+    while (hist.length > 150) { hist.shift(); hi--; }
+    lastKind = kind; lastRec = now; updateBtns();
+  }
+  function markDirty(){
+    dirty = true; cacheSoon();
+    if (conflict) return;
+    if (synced()) { setStatus("dirty"); scheduleSave(1500); } else setStatus("local");
+  }
+  function edited(kind){
+    val = serialize();
+    ed.classList.toggle("empty", val === "");
+    scheduleDecor();
+    record(kind);
+    markDirty();
+  }
+  function applyHist(i, refocus){
+    hi = i; lastKind = "";
+    var h = hist[i];
+    renderAll(h.t);
+    if (refocus) ed.focus({ preventScroll:true });
+    if (h.sel) { setSel(h.sel); revealLine(h.sel.el); }
+    markDirty();
+    updateBtns();
+  }
+  function undo(refocus){ if (hi > 0) applyHist(hi - 1, refocus); }
+  function redo(refocus){ if (hi < hist.length - 1) applyHist(hi + 1, refocus); }
+  var focusedAtPress = false;
+  [undoBtn, redoBtn, hBtn].forEach(function(b){
+    b.addEventListener("pointerdown", function(){ focusedAtPress = document.activeElement === ed; });
+    b.addEventListener("mousedown", function(e){ e.preventDefault(); });
+  });
+  undoBtn.onclick = function(){ undo(focusedAtPress); };
+  redoBtn.onclick = function(){ redo(focusedAtPress); };
+
+  /* ---- local copy (this device) ---- */
+  function writeCache(){ writeJSON(CACHE_KEY, { text:val, baseSha:baseSha, dirty:dirty }); }
+  function cacheSoon(){ clearTimeout(cacheTimer); cacheTimer = setTimeout(writeCache, 400); }
+  var cached = readJSON(CACHE_KEY);
+  if (cached && typeof cached.text === "string") { baseSha = cached.baseSha || null; dirty = !!cached.dirty; renderAll(cached.text); }
+  else renderAll("");
+  record("big");
+
+  /* ---- typing ---- */
+  function lcToOff(raw, l, c){
+    var off = 0;
+    for (var i = 0; i < l && i < raw.length; i++) off += raw[i].length + 1;
+    var line = raw[l] || "", m = HRE.exec(line);
+    return Math.min(off + (m ? m[0].length : 0) + c, off + line.length);
+  }
+  function offToLC(text, off){
+    var l = 0, start = 0, nl;
+    while ((nl = text.indexOf("\n", start)) >= 0 && off > nl) { start = nl + 1; l++; }
+    var end = text.indexOf("\n", start); if (end < 0) end = text.length;
+    var m = HRE.exec(text.slice(start, end));
+    return { l:l, c:Math.max(0, off - start - (m ? m[0].length : 0)) };
+  }
+  function replaceSel(ins, kind, S){
+    S = S || getSel() || lastSel;
+    if (!S) return;
+    var raw = val.split("\n");
+    var a = lcToOff(raw, S.sl, S.sc), b = lcToOff(raw, S.el, S.ec);
+    if (a > b) { var t = a; a = b; b = t; }
+    var nv = val.slice(0, a) + ins + val.slice(b);
+    renderAll(nv);
+    var p = offToLC(nv, a + ins.length);
+    setSel(caret(p.l, p.c));
+    edited(kind || "big");
+    revealLine(p.l);
+  }
+  function splitAt(S){
+    var k = ed.children, d = k[S.sl];
+    if (!d) return;
+    var t = lineText(d), c = Math.min(S.sc, t.length);
+    if (isH(d) && c === 0 && t) {
+      ed.insertBefore(lineEl({ h:false, t:"" }), d);
+      setSel(caret(S.sl + 1, 0));
+    } else {
+      setLineText(d, t.slice(0, c));
+      ed.insertBefore(lineEl({ h:false, t:t.slice(c) }), d.nextSibling);
+      setSel(caret(S.sl + 1, 0));
+    }
+    edited("nl");
+    revealLine(S.sl + 1);
+  }
+  function mergeUp(i){
+    var k = ed.children, prev = k[i - 1], cur = k[i];
+    if (!prev || !cur) return;
+    var pt = lineText(prev);
+    setLineText(prev, pt + lineText(cur));
+    ed.removeChild(cur);
+    setSel(caret(i - 1, pt.length));
+    edited("del");
+  }
+  ed.addEventListener("beforeinput", function(e){
+    var t = e.inputType || "";
+    if (t === "historyUndo") { e.preventDefault(); undo(true); return; }
+    if (t === "historyRedo") { e.preventDefault(); redo(true); return; }
+    if (t.indexOf("format") === 0) { e.preventDefault(); return; }
+    if (e.isComposing || composing) return;
+    var S = getSel(), col = collapsed(S);
+    if (t === "insertParagraph" || t === "insertLineBreak") {
+      if (!S || !e.cancelable) { pendingKind = "nl"; return; }
+      e.preventDefault();
+      if (col) splitAt(S); else replaceSel("\n", "nl", S);
+      return;
+    }
+    if (t === "deleteContentBackward" && col && S.sc === 0 && e.cancelable) {
+      var d = ed.children[S.sl];
+      if (d && isH(d)) { e.preventDefault(); d.removeAttribute("class"); setSel(S); edited("big"); return; }
+      if (S.sl > 0) { e.preventDefault(); mergeUp(S.sl); return; }
+    }
+    if (t === "deleteContentForward" && col && e.cancelable) {
+      var cur = ed.children[S.sl];
+      if (cur && S.sc >= lineText(cur).length && S.sl < ed.children.length - 1) { e.preventDefault(); mergeUp(S.sl + 1); setSel(caret(S.sl, S.sc)); return; }
+    }
+    if (!col || /Paste|Drop|Cut|Yank/.test(t)) pendingKind = "big";
+    else if (t.indexOf("insert") === 0) pendingKind = "ins";
+    else if (t.indexOf("delete") === 0) pendingKind = "del";
+    else pendingKind = "big";
+  });
+  ed.addEventListener("input", function(e){
+    if (e.isComposing || composing) {
+      val = serialize(); ed.classList.toggle("empty", val === ""); markDirty(); return;
+    }
+    normalize();
+    edited(e.inputType ? pendingKind : "big");
+    pendingKind = "big";
+  });
+  ed.addEventListener("compositionstart", function(){ composing = true; });
+  ed.addEventListener("compositionend", function(){
+    composing = false;
+    setTimeout(function(){ if (composing) return; normalize(); edited("ins"); }, 0);
+  });
+  ed.addEventListener("paste", function(e){
+    e.preventDefault();
+    var t = (e.clipboardData && e.clipboardData.getData("text/plain")) || "";
+    t = t.replace(/\r\n?/g, "\n").replace(/ /g, " ");
+    if (t) replaceSel(t, "big");
+  });
+  function selText(S){
+    var k = ed.children, out = [];
+    for (var i = S.sl; i <= S.el; i++) {
+      var d = k[i]; if (!d) break;
+      var t = lineText(d), s = i === S.sl ? S.sc : 0, en = i === S.el ? S.ec : t.length, piece = t.slice(s, en);
+      if (S.el > S.sl && isH(d) && s === 0) piece = "# " + piece;
+      out.push(piece);
+    }
+    return out.join("\n");
+  }
+  function onCopy(e, cut){
+    var S = getSel();
+    if (!S || collapsed(S) || !e.clipboardData) return;
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", selText(S));
+    if (cut) replaceSel("", "big", S);
+  }
+  ed.addEventListener("copy", function(e){ onCopy(e, false); });
+  ed.addEventListener("cut", function(e){ onCopy(e, true); });
+  ed.addEventListener("dragstart", function(e){ e.preventDefault(); });
+  ed.addEventListener("drop", function(e){ e.preventDefault(); });
+
+  /* ---- headings ---- */
+  function toggleHeading(refocus){
+    var S = getSel();
+    if (!S && lastSel) { if (refocus) ed.focus({ preventScroll:true }); S = lastSel; setSel(S); }
+    if (!S) return;
+    var a = S.sl, b = S.el;
+    if (b > a && S.ec === 0) b--;
+    var k = ed.children, single = a === b, filled = 0, allH = true;
+    for (var i = a; i <= b; i++) if (lineText(k[i]).trim()) { filled++; if (!isH(k[i])) allH = false; }
+    var off = single ? isH(k[a]) : (filled > 0 && allH);
+    for (var j = a; j <= b; j++) {
+      if (off) k[j].removeAttribute("class");
+      else if (single || lineText(k[j]).trim()) k[j].className = "h";
+    }
+    if (refocus) ed.focus({ preventScroll:true });
+    setSel(S);
+    edited("big");
+  }
+  hBtn.title = "標題（" + KEY_B + "）";
+  hBtn.setAttribute("aria-label", "標題（" + KEY_B + "）");
+  hBtn.onclick = function(){ toggleHeading(focusedAtPress); };
+
+  /* ---- heading names: card on the right (wide) / chips under the toolbar (phone) ---- */
+  var heads = [], tocSig = null, activeIdx = -2, decorQueued = false;
+  var tocList = $("tocList"), tocCard = $("tocCard"), tocBar = $("tocBar");
+  function scheduleDecor(){
+    if (decorQueued) return;
+    decorQueued = true;
+    requestAnimationFrame(function(){ decorQueued = false; renderDecor(); });
+  }
+  function renderDecor(){
+    var k = ed.children, hs = [];
+    for (var i = 0; i < k.length; i++) if (isH(k[i])) { var t = k[i].textContent.trim(); if (t) hs.push({ i:i, text:t }); }
+    heads = hs;
+    renderToc();
+    spy();
+  }
+  function tocButton(h, i){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "toc-i"; b.dataset.i = i; b.textContent = h.text;
+    return b;
+  }
+  function renderToc(){
+    var sig = heads.map(function(h){ return h.i + ":" + h.text; }).join("\n");
+    if (sig === tocSig) return;
+    tocSig = sig;
+    tocList.textContent = ""; tocBar.textContent = "";
+    heads.forEach(function(h, i){
+      var li = document.createElement("li"); li.appendChild(tocButton(h, i)); tocList.appendChild(li);
+      tocBar.appendChild(tocButton(h, i));
+    });
+    var any = heads.length > 0;
+    document.body.classList.toggle("has-toc", any);
+    tocBar.hidden = !any;
+    activeIdx = -2;
+  }
+  function spy(){
+    if (tab !== "notes") return;
+    var act = -1, k = ed.children;
+    if (heads.length) {
+      var mark = topH() + 48;
+      for (var i = 0; i < heads.length; i++) {
+        var d = k[heads[i].i];
+        if (!d) break;
+        if (d.getBoundingClientRect().top <= mark) act = i; else break;
+      }
+      if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4) {
+        for (var j = heads.length - 1; j > act; j--) {
+          var dj = k[heads[j].i];
+          if (dj && dj.getBoundingClientRect().top < window.innerHeight - 40) { act = j; break; }
+        }
+      }
+    }
+    if (act === activeIdx) return;
+    activeIdx = act;
+    [tocList, tocBar].forEach(function(box){
+      var bs = box.querySelectorAll(".toc-i");
+      for (var n = 0; n < bs.length; n++) bs[n].classList.toggle("on", n === act);
+    });
+    var c = tocList.querySelectorAll(".toc-i")[act];
+    if (c && tocCard.clientHeight) {
+      var top = c.offsetTop, bot = top + c.offsetHeight;
+      if (top < tocCard.scrollTop + 30) tocCard.scrollTop = Math.max(0, top - 30);
+      else if (bot > tocCard.scrollTop + tocCard.clientHeight - 20) tocCard.scrollTop = bot - tocCard.clientHeight + 20;
+    }
+    var chip = tocBar.querySelectorAll(".toc-i")[act];
+    if (chip && tocBar.clientWidth) {
+      var l = chip.offsetLeft, r = l + chip.offsetWidth;
+      if (l < tocBar.scrollLeft + 14) tocBar.scrollLeft = Math.max(0, l - 14);
+      else if (r > tocBar.scrollLeft + tocBar.clientWidth - 14) tocBar.scrollLeft = r - tocBar.clientWidth + 14;
+    }
+  }
+  var spyQueued = false;
+  window.addEventListener("scroll", function(){
+    if (spyQueued) return;
+    spyQueued = true;
+    requestAnimationFrame(function(){ spyQueued = false; spy(); });
+  }, { passive:true });
+  function jumpTo(h){
+    var d = ed.children[h.i];
+    if (!d) return;
+    if (FINE) { ed.focus({ preventScroll:true }); setSel(caret(h.i, lineText(d).length)); }
+    var y = d.getBoundingClientRect().top + window.scrollY - topH() - 14;
+    window.scrollTo({ top:Math.max(0, y), behavior:REDUCE ? "auto" : "smooth" });
+    d.classList.add("flash");
+    setTimeout(function(){ d.classList.remove("flash"); if (!d.getAttribute("class")) d.removeAttribute("class"); }, 1600);
+  }
+  function onTocClick(e){
+    var b = e.target.closest && e.target.closest(".toc-i");
+    if (!b) return;
+    var h = heads[+b.dataset.i];
+    if (h) jumpTo(h);
+  }
+  tocList.addEventListener("click", onTocClick);
+  tocBar.addEventListener("click", onTocClick);
+  [tocList, tocBar].forEach(function(box){ box.addEventListener("mousedown", function(e){ e.preventDefault(); }); });
+
+  /* ---- applying the GitHub version ---- */
+  var scrollMem = { notes:null, todo:0 };
+  function pageBottom(){ window.scrollTo(0, document.documentElement.scrollHeight); }
+  function setText(t){
+    if (val === t) return;
+    var focused = document.activeElement === ed, S = focused ? getSel() : null, n = ed.children.length;
+    var sy = window.scrollY, wasEmpty = !val;
+    renderAll(t);
+    if (S) {
+      var m = ed.children.length, l = Math.max(0, Math.min(m - 1, m - (n - S.el)));
+      var c = Math.min(S.ec, lineText(ed.children[l]).length);
+      setSel(caret(l, c));
+    }
+    if (tab === "notes") { if (wasEmpty && !focused) pageBottom(); else window.scrollTo(0, sy); }
+    else if (wasEmpty) scrollMem.notes = null;
+    record("big");
+  }
+  function handleRemote(r){
+    loaded = true;
+    if (!r.exists) { baseSha = null; if (val) { dirty = true; scheduleSave(300); } else setStatus("saved"); return; }
+    if (r.sha === baseSha) { if (!dirty && !conflict && !saving) setStatus("saved"); return; }
+    if (myShas.indexOf(r.sha) >= 0) return;                 // an old copy of something this device wrote
+    if (!dirty && !conflict) { setText(r.text); baseSha = r.sha; writeCache(); setStatus("saved"); return; }
+    if (val === r.text) { baseSha = r.sha; dirty = false; writeCache(); setStatus("saved"); return; }
+    showConflict(r);
+  }
+  function notesErr(e){
+    var lbl = errLabel(e);
+    if (lbl) { setStatus("error", lbl); return; }
+    setStatus("offline");
+    if (dirty) { scheduleSave(retryMs); retryMs = Math.min(retryMs * 2, 60000); }
+  }
+  function pullNotes(){
+    if (!synced() || saving || conflict) return Promise.resolve();
+    return getFile("notes.md").then(handleRemote, notesErr);
+  }
+
+  /* ---- saving ---- */
+  function scheduleSave(ms){ clearTimeout(saveTimer); saveTimer = setTimeout(save, ms); }
+  function save(){
+    if (!synced() || conflict || !dirty) return Promise.resolve();
+    if (saving) { queued = true; return Promise.resolve(); }
+    var text = val;
+    if (byteSize(text) > LIMIT) { setStatus("error", "筆記太大（上限約 900 KB）· 刪啲舊嘢先"); return Promise.resolve(); }
+    saving = true; setStatus("saving");
+    return putFile("notes.md", text, baseSha, "notes · " + DEVICE).then(function(sha){
+      baseSha = sha; remember(myShas, sha); retryMs = 2000; loaded = true;
+      if (val === text) { dirty = false; setStatus("saved"); } else { setStatus("dirty"); scheduleSave(800); }
+      writeCache();
+    }, function(e){
+      if (e && e.code === "conflict") {
+        return getFile("notes.md").then(function(r){
+          if (!r.exists) { baseSha = null; scheduleSave(300); return; }
+          if (r.text === val) { baseSha = r.sha; dirty = false; writeCache(); setStatus("saved"); return; }
+          showConflict(r);
+        }, notesErr);
+      }
+      notesErr(e);
+    }).then(function(){
+      saving = false;
+      if (queued) { queued = false; scheduleSave(300); }
+    });
+  }
+
+  /* ---- conflicts ---- */
+  function showConflict(r){
+    conflict = r;
+    clearTimeout(saveTimer);
+    bannerText.textContent = "筆記：另一部機改過，呢部機又有未存嘅改動。點處理？";
+    banner.classList.add("show");
+    setStatus("dirty", "有衝突 · 揀一個");
+  }
+  function resolve(newText, keepDirty){
+    var c = conflict; conflict = null;
+    banner.classList.remove("show");
+    baseSha = c && c.sha ? c.sha : null;
+    if (newText !== null) setText(newText);
+    dirty = keepDirty;
+    writeCache();
+    if (dirty) scheduleSave(100); else setStatus("saved");
+  }
+  $("keepBoth").onclick = function(){
+    var remote = (conflict && typeof conflict.text === "string") ? conflict.text : "";
+    var have = {};
+    remote.split("\n").forEach(function(l){ var k = l.trim(); if (k) have[k] = 1; });
+    var extra = val.split("\n").filter(function(l){ var k = l.trim(); return k && !have[k]; });
+    var merged = extra.length
+      ? remote.replace(/\s+$/, "") + (remote.trim() ? "\n\n" : "") + "── " + DEVICE + " 未同步嘅 · " + stamp(new Date()) + " ──\n" + extra.join("\n") + "\n"
+      : remote;
+    resolve(merged, merged !== remote);
+    toast("兩邊都留咗");
+  };
+  $("useRemote").onclick = function(){ resolve((conflict && typeof conflict.text === "string") ? conflict.text : "", false); };
+  $("useMine").onclick = function(){ resolve(null, true); };
+
+  /* =====================================================================
+     錄音 → 加去筆記最底 (原文；香港冇總結)
+     ===================================================================== */
+  var micBtn = $("micBtn"), vPanel = $("vPanel"), vText = $("vText"), vPartial = $("vPartial"), vMsg = $("vMsg");
+  var vState = $("vState"), vTime = $("vTime"), vLang = $("vLang"), vRec = $("vRec"), vDone = $("vDone");
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var USE_SR = !!SR && !IOS;                      // iPhone: the keyboard's own mic works better
+  var rec = null, wantRec = false, dState = "idle", recT0 = 0, recTimer = null;
+  var DRAFT_KEY = "hk-voice-draft-v1", LANG_KEY = "hk-voice-lang-v1";
+  vText.placeholder = USE_SR ? "講嘢，啲字會出喺度。講完撳「完成」，會加去筆記最底。" : "用鍵盤個咪（🎙）講，或者直接打字。講完撳「完成」，會加去筆記最底。";
+  try { var dv = localStorage.getItem(DRAFT_KEY); if (dv) vText.value = dv; } catch(e){}
+  try { var lv = localStorage.getItem(LANG_KEY); if (lv && [].some.call(vLang.options, function(o){ return o.value === lv; })) vLang.value = lv; } catch(e){}
+  function saveDraft(){ try { if (vText.value) localStorage.setItem(DRAFT_KEY, vText.value); else localStorage.removeItem(DRAFT_KEY); } catch(e){} }
+  vText.addEventListener("input", saveDraft);
+  vLang.addEventListener("change", function(){ try { localStorage.setItem(LANG_KEY, vLang.value); } catch(e){} });
+  function mmss(ms){ var s = Math.floor(ms / 1000); return pad2(Math.floor(s / 60)) + ":" + pad2(s % 60); }
+  function renderPanel(){
+    vPanel.dataset.s = dState;
+    vState.textContent = dState === "starting" ? "準備緊…" : dState === "listening" ? "錄緊音" :
+                         (vText.value.trim() ? "停咗" : (USE_SR ? "未開始" : "用鍵盤個咪講"));
+    if (dState !== "listening") vTime.textContent = "";
+    vRec.hidden = !USE_SR; vLang.hidden = !USE_SR;
+    vRec.textContent = dState === "idle" ? (vText.value.trim() ? "● 繼續錄" : "● 錄音") : "■ 停";
+    vRec.classList.toggle("on", dState !== "idle");
+    vLang.disabled = dState !== "idle";
+    micBtn.classList.toggle("rec", dState !== "idle");
+  }
+  function appendFinal(t){
+    t = String(t || "").trim();
+    if (!t) return;
+    var cur = vText.value;
+    if (cur && /[A-Za-z0-9.,!?]$/.test(cur) && /^[A-Za-z0-9]/.test(t)) t = " " + t;
+    else if (cur && /[A-Za-z0-9]$/.test(cur) === false && /[㐀-鿿]$/.test(cur) && /^[㐀-鿿]/.test(t)) t = "，" + t;
+    vText.value = cur + t;
+    vText.scrollTop = vText.scrollHeight;
+    saveDraft();
+  }
+  var SR_ERR = {
+    "not-allowed": "冇咪權限。喺瀏覽器網址列嗰度准呢頁用咪，或者用鍵盤個咪講。",
+    "service-not-allowed": "呢個瀏覽器唔俾用語音輸入。用鍵盤個咪講，或者轉用 Chrome。",
+    "network": "語音服務連唔到（要上網）。",
+    "audio-capture": "搵唔到咪。",
+    "language-not-supported": "呢個語言錄唔到，揀第二個再試。"
+  };
+  function startRec(){
+    if (!USE_SR) { vText.focus(); return; }
+    vMsg.textContent = "";
+    try { if (rec) rec.abort(); } catch(e){}
+    rec = new SR();
+    rec.lang = vLang.value || navigator.language || "zh-HK";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onstart = function(){
+      dState = "listening";
+      if (!recT0) recT0 = Date.now();
+      clearInterval(recTimer);
+      recTimer = setInterval(function(){ vTime.textContent = mmss(Date.now() - recT0); }, 500);
+      renderPanel();
+    };
+    rec.onresult = function(e){
+      var interim = "";
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var r = e.results[i];
+        if (r.isFinal) appendFinal(r[0].transcript); else interim += r[0].transcript;
+      }
+      vPartial.textContent = interim;
+      renderPanel();
+    };
+    rec.onerror = function(e){
+      var c = e && e.error;
+      if (c === "no-speech" || c === "aborted") return;
+      if (c === "not-allowed" || c === "service-not-allowed" || c === "audio-capture" || c === "language-not-supported") wantRec = false;
+      vMsg.textContent = SR_ERR[c] || ("錄音出錯（" + c + "），再撳一次試吓。");
+    };
+    rec.onend = function(){
+      if (wantRec) { try { rec.start(); return; } catch(x){} }      // browsers stop after a pause; keep going until 停
+      dState = "idle"; clearInterval(recTimer); recT0 = 0; vPartial.textContent = "";
+      renderPanel();
+    };
+    wantRec = true; dState = "starting";
+    try { rec.start(); } catch(e){ wantRec = false; dState = "idle"; vMsg.textContent = "開唔到錄音，再撳一次試吓。"; }
+    renderPanel();
+  }
+  function stopRec(){ wantRec = false; if (rec) { try { rec.stop(); } catch(e){} } }
+  function fitPanel(){
+    var vv = window.visualViewport;
+    vPanel.style.setProperty("--vb", (vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0) + "px");
+  }
+  if (window.visualViewport) { visualViewport.addEventListener("resize", fitPanel); visualViewport.addEventListener("scroll", fitPanel); }
+  function closePanel(){ stopRec(); vPanel.hidden = true; vMsg.textContent = ""; }
+  micBtn.onclick = function(){
+    if (!vPanel.hidden && dState !== "idle") { stopRec(); return; }
+    vPanel.hidden = false; fitPanel(); renderPanel();
+    if (USE_SR) startRec(); else vText.focus();
+  };
+  vRec.onclick = function(){ if (dState === "idle") startRec(); else stopRec(); };
+  $("vClose").onclick = closePanel;
+  $("vClear").onclick = function(){ vText.value = ""; vPartial.textContent = ""; vMsg.textContent = ""; saveDraft(); renderPanel(); vText.focus(); };
+  function appendBlock(title, bodyLines){
+    var base = val.replace(/\s+$/, "");
+    renderAll(base + (base ? "\n\n" : "") + ["# " + title].concat(bodyLines).join("\n"));
+    edited("big");
+    requestAnimationFrame(function(){
+      pageBottom();
+      var hs = ed.querySelectorAll(":scope > .h"), d = hs[hs.length - 1];
+      if (d) { d.classList.add("flash"); setTimeout(function(){ d.classList.remove("flash"); }, 1600); }
+    });
+    toast("加咗去筆記最底", "還原", function(){ undo(false); });
+  }
+  vDone.onclick = function(){
+    var go = function(){
+      var raw = (vText.value + (vPartial.textContent ? " " + vPartial.textContent : "")).trim();
+      if (!raw) { vMsg.textContent = "未有內容。"; return; }
+      var lines = raw.split(/\n+/).map(function(l){ return l.replace(/\s+/g, " ").trim().replace(/^#+\s*/, ""); }).filter(Boolean);
+      appendBlock("錄音 " + stamp(new Date()), lines);
+      vText.value = ""; vPartial.textContent = ""; saveDraft(); closePanel();
+    };
+    if (dState !== "idle" && rec) { wantRec = false; var done = false; var fin = function(){ if (!done) { done = true; go(); } };
+      var prevEnd = rec.onend; rec.onend = function(){ prevEnd && prevEnd(); fin(); }; try { rec.stop(); } catch(e){ fin(); } setTimeout(fin, 1500); return; }
+    go();
+  };
+
+  /* =====================================================================
+     待辦 (Eisenhower 2×2) — todos.json, merged item by item
+     ===================================================================== */
+  var QS = { do:"Do", plan:"Plan", out:"Outsource", drop:"Fuck that" };
+  var QK = ["do", "plan", "out", "drop"];
+  var TCACHE = "hk-todos-cache-v1";
+  var todoView = $("todoView");
+  var tstatusEl = $("tstatus"), tstatusText = $("tstatusText");
+  var items = {}, tBaseSha = null, tVer = 0, tSavedVer = 0, tSaving = false, tShas = [], tTimer = null, tRetry = 2000;
+  var tErr = "", tOffline = false, tLoaded = false;
+  var liMap = {}, selId = null, editStart = {}, textTimers = {};
+  var DAY = 86400000;
+
+  function norm(id, d){
+    var it = { id:id, text:String(d.text || "").slice(0, 500), q:QS[d.q] ? d.q : "do", done:!!d.done,
+               order:typeof d.order === "number" ? d.order : 0, createdAt:+d.createdAt || Date.now(), doneAt:+d.doneAt || 0,
+               updatedAt:+d.updatedAt || +d.createdAt || 0 };
+    if (d.deleted) it.deleted = true;
+    return it;
+  }
+  function parseTodos(text){
+    var out = {};
+    try {
+      var j = JSON.parse(text || "{}"), src = (j && j.items) || {};
+      Object.keys(src).forEach(function(id){ if (src[id] && typeof src[id] === "object" && /^[\w-]{1,40}$/.test(id)) out[id] = norm(id, src[id]); });
+    } catch(e){}
+    return out;
+  }
+  function payload(){
+    var cut = Date.now() - 30 * DAY, out = {};
+    Object.keys(items).sort().forEach(function(id){
+      var it = items[id];
+      if (it.deleted && it.updatedAt < cut) { delete items[id]; return; }
+      var o = { text:it.text, q:it.q, done:it.done, order:it.order, createdAt:it.createdAt, doneAt:it.doneAt || 0, updatedAt:it.updatedAt };
+      if (it.deleted) o.deleted = true;
+      out[id] = o;
+    });
+    return JSON.stringify({ v:1, items:out }, null, 1);
+  }
+  (function(){
+    var c = readJSON(TCACHE);
+    if (c && c.items) {
+      Object.keys(c.items).forEach(function(id){ items[id] = norm(id, c.items[id]); });
+      tBaseSha = c.baseSha || null;
+      if (c.dirty) tVer = 1;
+    }
+  })();
+  function tDirty(){ return tVer !== tSavedVer; }
+  function tcacheSoon(){
+    clearTimeout(tcacheSoon._t);
+    tcacheSoon._t = setTimeout(function(){ writeJSON(TCACHE, { items:items, baseSha:tBaseSha, dirty:tDirty() }); }, 300);
+  }
+  function tStatus(){
+    var s, msg = "";
+    if (tErr) { s = "error"; msg = tErr; }
+    else if (!synced()) s = "local";
+    else if (tOffline && tDirty()) s = "offline";
+    else if (tSaving || tDirty()) s = "saving";
+    else if (!tLoaded) s = tOffline ? "offline" : "loading";
+    else s = "saved";
+    tstatusEl.dataset.s = s;
+    tstatusText.textContent = msg || (s === "offline" ? "連唔到 · 改動會等連返先存" : LABELS[s]);
+  }
+  function touch(id){
+    if (items[id]) items[id].updatedAt = Date.now();
+    tVer++; tcacheSoon(); tSaveSoon(); tStatus();
+  }
+  function tSaveSoon(ms){ clearTimeout(tTimer); tTimer = setTimeout(tSave, ms == null ? 1000 : ms); }
+  function tNetErr(e){
+    var lbl = errLabel(e);
+    if (lbl) tErr = lbl;
+    else { tOffline = true; tRetry = Math.min(tRetry * 2, 60000); }
+  }
+  function mergeIn(remote){
+    var ahead = false;
+    Object.keys(remote).forEach(function(id){
+      var r = remote[id], l = items[id];
+      if (!l || r.updatedAt > l.updatedAt) items[id] = r;
+      else if (l.updatedAt > r.updatedAt) ahead = true;
+    });
+    Object.keys(items).forEach(function(id){ if (!remote[id]) ahead = true; });
+    return ahead;
+  }
+  function tPull(){
+    if (!synced()) return Promise.resolve();
+    return getFile("todos.json").then(function(r){
+      tLoaded = true; tOffline = false; tErr = "";
+      if (!r.exists) { tBaseSha = null; if (Object.keys(items).length && !tDirty()) tVer++; }
+      else if (r.sha !== tBaseSha && tShas.indexOf(r.sha) < 0) {
+        var ahead = mergeIn(parseTodos(r.text));
+        tBaseSha = r.sha;
+        if (ahead) { if (!tDirty()) tVer++; } else tSavedVer = tVer;
+        renderTodos();
+      }
+      tcacheSoon(); tStatus();
+      if (tDirty()) tSaveSoon(300);
+    }, function(e){ tNetErr(e); tStatus(); });
+  }
+  function tSave(){
+    if (!synced() || tSaving || !tDirty()) return;
+    tSaving = true; tStatus();
+    var v = tVer, body = payload();
+    putFile("todos.json", body, tBaseSha, "todos · " + DEVICE).then(function(sha){
+      tBaseSha = sha; remember(tShas, sha); tSavedVer = v; tOffline = false; tErr = ""; tRetry = 2000; tLoaded = true;
+    }, function(e){
+      if (e && e.code === "conflict") { tSaving = false; return tPull(); }
+      tNetErr(e);
+    }).then(function(){
+      tSaving = false; tcacheSoon(); tStatus();
+      if (tDirty() && !tErr) tSaveSoon(tOffline ? tRetry : 300);
+    });
+  }
+
+  function live(it){ return it && !it.deleted; }
+  function sorted(q){
+    var open = [], done = [];
+    Object.keys(items).forEach(function(id){
+      var it = items[id];
+      if (!live(it) || it.q !== q) return;
+      (it.done ? done : open).push(it);
+    });
+    open.sort(function(a, b){ return (a.order - b.order) || (a.createdAt - b.createdAt); });
+    done.sort(function(a, b){ return b.doneAt - a.doneAt; });
+    return { open:open, done:done };
+  }
+  function maxOrder(q){
+    var m = 0;
+    Object.keys(items).forEach(function(id){ var it = items[id]; if (live(it) && it.q === q && it.order > m) m = it.order; });
+    return m;
+  }
+
+  var GRIP = '<svg viewBox="0 0 10 20"><circle cx="3" cy="5" r="1.4"/><circle cx="7" cy="5" r="1.4"/><circle cx="3" cy="10" r="1.4"/><circle cx="7" cy="10" r="1.4"/><circle cx="3" cy="15" r="1.4"/><circle cx="7" cy="15" r="1.4"/></svg>';
+  var CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg>';
+  var XICON = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  function makeLi(id){
+    var li = document.createElement("li");
+    li.className = "it"; li.dataset.id = id;
+    var grip = document.createElement("span");
+    grip.className = "grip"; grip.innerHTML = GRIP; grip.title = "拖去第二格";
+    if (FINE) grip.draggable = true;
+    var ck = document.createElement("button");
+    ck.type = "button"; ck.className = "ck"; ck.setAttribute("role", "checkbox"); ck.setAttribute("aria-label", "完成"); ck.innerHTML = CHECK;
+    var bd = document.createElement("div"); bd.className = "bd";
+    var tx = document.createElement("div"); tx.className = "tx"; tx.setAttribute("role", "textbox"); tx.setAttribute("aria-label", "待辦內容");
+    tx.contentEditable = "plaintext-only";
+    if (tx.contentEditable !== "plaintext-only") tx.contentEditable = "true";
+    tx.spellcheck = false;
+    var age = document.createElement("div"); age.className = "age";
+    bd.appendChild(tx); bd.appendChild(age);
+    var x = document.createElement("button");
+    x.type = "button"; x.className = "x"; x.innerHTML = XICON; x.title = "刪除"; x.setAttribute("aria-label", "刪除");
+    var acts = document.createElement("div"); acts.className = "acts";
+    var l = document.createElement("span"); l.className = "l"; l.textContent = "移去"; acts.appendChild(l);
+    QK.forEach(function(k){
+      var b = document.createElement("button"); b.type = "button"; b.className = "mv"; b.dataset.to = k; b.textContent = QS[k];
+      acts.appendChild(b);
+    });
+    var del = document.createElement("button"); del.type = "button"; del.className = "del"; del.textContent = "刪除";
+    acts.appendChild(del);
+    li.appendChild(grip); li.appendChild(ck); li.appendChild(bd); li.appendChild(x); li.appendChild(acts);
+    return li;
+  }
+  function fillLi(li, it, now){
+    li.classList.toggle("done", it.done);
+    li.querySelector(".ck").setAttribute("aria-checked", it.done ? "true" : "false");
+    var tx = li.querySelector(".tx");
+    if (document.activeElement !== tx && tx.textContent !== it.text) tx.textContent = it.text;
+    var age = li.querySelector(".age"), days = Math.floor((now - it.createdAt) / DAY), stale = it.q === "plan" && days >= 7;
+    var label = it.done || days < 1 ? "" : (stale ? "放咗 " + days + " 日" : days + " 日");
+    if (age.textContent !== label) age.textContent = label;
+    age.hidden = !label;
+    age.classList.toggle("old", stale);
+    var mv = li.querySelectorAll(".mv");
+    for (var i = 0; i < mv.length; i++) mv[i].hidden = mv[i].dataset.to === it.q;
+    li.querySelector(".grip").hidden = it.done;
+    li.classList.toggle("sel", selId === it.id);
+  }
+  function place(ul, list, now, seen){
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      seen[it.id] = 1;
+      var li = liMap[it.id] || (liMap[it.id] = makeLi(it.id));
+      fillLi(li, it, now);
+      if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
+    }
+  }
+  function renderTodos(){
+    if (tab !== "todo") return;
+    var now = Date.now(), seen = {};
+    QK.forEach(function(k){
+      var s = sorted(k);
+      place($("ul-" + k), s.open, now, seen);
+      place($("dul-" + k), s.done, now, seen);
+      $("n-" + k).textContent = s.open.length ? s.open.length + " 項" : "";
+      $("done-" + k).hidden = !s.done.length;
+      $("dn-" + k).textContent = s.done.length;
+    });
+    Object.keys(liMap).forEach(function(id){
+      if (seen[id]) return;
+      var li = liMap[id];
+      if (li.parentNode) li.parentNode.removeChild(li);
+      delete liMap[id];
+      if (selId === id) selId = null;
+    });
+  }
+
+  function idOf(el){ var li = el.closest && el.closest("li.it"); return li ? li.dataset.id : null; }
+  function setSelItem(id){
+    if (selId === id) return;
+    if (selId && liMap[selId]) liMap[selId].classList.remove("sel");
+    selId = id;
+    if (id && liMap[id]) liMap[id].classList.add("sel");
+  }
+  function removeItems(ids, msg, restoreText){
+    var saved = ids.map(function(id){
+      var c = {}; for (var k in items[id]) c[k] = items[id][k];
+      if (restoreText && restoreText[id]) c.text = restoreText[id];
+      delete c.deleted;
+      return c;
+    });
+    ids.forEach(function(id){ items[id].deleted = true; items[id].updatedAt = Date.now(); });
+    tVer++; tcacheSoon(); tSaveSoon(); tStatus();
+    if (ids.indexOf(selId) >= 0) selId = null;
+    renderTodos();
+    toast(msg, "還原", function(){
+      saved.forEach(function(c){ c.updatedAt = Date.now(); items[c.id] = c; });
+      tVer++; tcacheSoon(); tSaveSoon(); tStatus();
+      renderTodos();
+    });
+  }
+  function toggleDone(id){
+    var it = items[id];
+    if (!live(it)) return;
+    it.done = !it.done;
+    it.doneAt = it.done ? Date.now() : 0;
+    if (!it.done) it.order = maxOrder(it.q) + 1;
+    touch(id);
+    var li = liMap[id];
+    if (li) li.querySelector(".ck").setAttribute("aria-checked", it.done ? "true" : "false");
+    setTimeout(renderTodos, it.done && !REDUCE ? 380 : 0);
+  }
+  function moveTo(id, q){
+    var it = items[id];
+    if (!live(it) || it.q === q) return;
+    it.q = q; it.order = maxOrder(q) + 1;
+    touch(id); setSelItem(null); renderTodos();
+    toast("搬咗去 " + QS[q]);
+  }
+  function makeId(){ return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  todoView.addEventListener("click", function(e){
+    var t = e.target, id;
+    if (t.closest(".ck")) { id = idOf(t); if (id) toggleDone(id); return; }
+    if (t.closest(".x") || t.closest(".del")) { id = idOf(t); if (id && live(items[id])) removeItems([id], "刪咗 1 項"); return; }
+    var mv = t.closest(".mv");
+    if (mv) { id = idOf(mv); if (id) moveTo(id, mv.dataset.to); return; }
+    var clr = t.closest(".clear");
+    if (clr) {
+      var ids = sorted(clr.dataset.clear).done.map(function(x){ return x.id; });
+      if (ids.length) removeItems(ids, "清走咗 " + ids.length + " 項");
+      return;
+    }
+    var it = t.closest("li.it");
+    if (it) {
+      setSelItem(it.dataset.id);
+      if (!t.closest(".tx")) { var tx = it.querySelector(".tx"); if (tx && document.activeElement !== tx) tx.focus(); }
+    }
+  });
+  todoView.addEventListener("submit", function(e){
+    e.preventDefault();
+    var f = e.target, q = f.dataset.q, inp = f.querySelector("input");
+    var text = inp.value.replace(/\s+/g, " ").trim().slice(0, 500);
+    if (!text) return;
+    var id = makeId(), now = Date.now();
+    items[id] = { id:id, text:text, q:q, done:false, order:maxOrder(q) + 1, createdAt:now, doneAt:0, updatedAt:now };
+    inp.value = "";
+    touch(id); renderTodos();
+  });
+  todoView.addEventListener("focusin", function(e){
+    var tx = e.target.closest && e.target.closest(".tx");
+    if (!tx) return;
+    var id = idOf(tx);
+    if (!id || !items[id]) return;
+    editStart[id] = items[id].text;
+    setSelItem(id);
+  });
+  todoView.addEventListener("input", function(e){
+    var tx = e.target.closest && e.target.closest(".tx");
+    if (!tx) return;
+    var id = idOf(tx), it = items[id];
+    if (!it) return;
+    it.text = tx.textContent.slice(0, 500);
+    clearTimeout(textTimers[id]);
+    textTimers[id] = setTimeout(function(){
+      var x = items[id];
+      if (live(x) && x.text.trim()) touch(id);
+    }, 900);
+  });
+  todoView.addEventListener("focusout", function(e){
+    var tx = e.target.closest && e.target.closest(".tx");
+    if (!tx) return;
+    var id = idOf(tx), it = items[id];
+    if (!live(it)) return;
+    clearTimeout(textTimers[id]);
+    var t = tx.textContent.replace(/\s+/g, " ").trim().slice(0, 500);
+    if (!t) { var r = {}; r[id] = editStart[id]; removeItems([id], "刪咗 1 項", r); return; }
+    if (tx.textContent !== t) tx.textContent = t;
+    var changed = it.text !== t || t !== editStart[id];
+    it.text = t;
+    if (changed) touch(id);
+  });
+  todoView.addEventListener("keydown", function(e){
+    var tx = e.target.closest && e.target.closest(".tx");
+    if (!tx) return;
+    var mod = e.metaKey || e.ctrlKey, k = (e.key || "").toLowerCase();
+    if (mod && (k === "b" || k === "i" || k === "u")) { e.preventDefault(); return; }
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter") { e.preventDefault(); tx.blur(); return; }
+    if (e.key === "Escape") {
+      var id = idOf(tx);
+      if (id && items[id] && editStart[id] != null) { items[id].text = editStart[id]; tx.textContent = editStart[id]; }
+      tx.blur(); setSelItem(null);
+    }
+  });
+  todoView.addEventListener("paste", function(e){
+    var tx = e.target.closest && e.target.closest(".tx");
+    if (!tx || tx.contentEditable === "plaintext-only") return;
+    e.preventDefault();
+    var t = (e.clipboardData && e.clipboardData.getData("text/plain") || "").replace(/\s+/g, " ");
+    try { document.execCommand("insertText", false, t); } catch(x){}
+  });
+  document.addEventListener("pointerdown", function(e){
+    if (!selId) return;
+    var li = liMap[selId];
+    if (!li || !li.contains(e.target)) setSelItem(null);
+  });
+
+  /* drag between boxes (mouse / trackpad) */
+  var dragId = null;
+  function clearMarks(){
+    var m = todoView.querySelectorAll(".drop-before,.drop-end,.over");
+    for (var i = 0; i < m.length; i++) m[i].classList.remove("drop-before", "drop-end", "over");
+  }
+  function dropTarget(quad, y){
+    var ul = quad.querySelector(".items.open");
+    var lis = [].filter.call(ul.children, function(li){ return li.dataset.id !== dragId; });
+    for (var i = 0; i < lis.length; i++) {
+      var r = lis[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) return { ul:ul, before:lis[i] };
+    }
+    return { ul:ul, before:null };
+  }
+  todoView.addEventListener("dragstart", function(e){
+    var g = e.target.closest && e.target.closest(".grip");
+    if (!g) return;
+    var li = g.closest("li.it");
+    dragId = li.dataset.id;
+    try {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", (items[dragId] && items[dragId].text) || "");
+      e.dataTransfer.setDragImage(li, 14, 14);
+    } catch(x){}
+    setSelItem(null);
+    setTimeout(function(){ li.classList.add("dragging"); }, 0);
+  });
+  todoView.addEventListener("dragover", function(e){
+    if (!dragId) return;
+    var quad = e.target.closest && e.target.closest(".quad");
+    if (!quad) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = "move"; } catch(x){}
+    var t = dropTarget(quad, e.clientY);
+    clearMarks();
+    quad.classList.add("over");
+    if (t.before) t.before.classList.add("drop-before"); else t.ul.classList.add("drop-end");
+  });
+  todoView.addEventListener("dragleave", function(e){
+    if (dragId && !(e.relatedTarget && todoView.contains(e.relatedTarget))) clearMarks();
+  });
+  todoView.addEventListener("drop", function(e){
+    if (!dragId) return;
+    var quad = e.target.closest && e.target.closest(".quad");
+    e.preventDefault();
+    var it = items[dragId];
+    if (quad && live(it)) {
+      var q = quad.dataset.q, t = dropTarget(quad, e.clientY), from = it.q;
+      var list = sorted(q).open.filter(function(x){ return x.id !== dragId; });
+      var idx = t.before ? list.findIndex(function(x){ return x.id === t.before.dataset.id; }) : list.length;
+      if (idx < 0) idx = list.length;
+      var prev = list[idx - 1], next = list[idx];
+      it.order = prev && next ? (prev.order + next.order) / 2 : prev ? prev.order + 1 : next ? next.order - 1 : 1;
+      it.q = q;
+      touch(dragId);
+      renderTodos();
+      if (from !== q) toast("搬咗去 " + QS[q]);
+    }
+    clearMarks();
+  });
+  todoView.addEventListener("dragend", function(){
+    if (dragId && liMap[dragId]) liMap[dragId].classList.remove("dragging");
+    dragId = null; clearMarks();
+  });
+
+  /* =====================================================================
+     sync settings
+     ===================================================================== */
+  var setModal = $("setModal"), ghOwner = $("ghOwner"), ghRepo = $("ghRepo"), ghToken = $("ghToken"), ghRes = $("ghRes");
+  function openSettings(){
+    ghOwner.value = gh.owner || ""; ghRepo.value = gh.repo || ""; ghToken.value = gh.token || "";
+    ghRes.textContent = synced() ? "已經連咗 " + gh.owner + "/" + gh.repo + "。" : "";
+    ghRes.className = "mres" + (synced() ? " ok" : "");
+    $("ghOff").hidden = !synced();
+    setModal.hidden = false;
+    (synced() ? ghToken : (ghOwner.value ? ghToken : ghOwner)).focus();
+  }
+  function closeSettings(){ setModal.hidden = true; }
+  $("status").onclick = openSettings;
+  $("tstatus").onclick = openSettings;
+  $("ghCancel").onclick = closeSettings;
+  setModal.addEventListener("click", function(e){ if (e.target === setModal) closeSettings(); });
+  $("ghOff").onclick = function(){
+    gh.token = ""; writeJSON(GH_KEY, gh);
+    closeSettings(); idleStatus(); tStatus();
+    toast("停咗同步 · 之後只存喺呢部機");
+  };
+  $("ghSave").onclick = function(){
+    var o = ghOwner.value.trim(), r = ghRepo.value.trim(), t = ghToken.value.trim();
+    if (!o || !r || !t) { ghRes.textContent = "三格都要填。"; ghRes.className = "mres bad"; return; }
+    ghRes.textContent = "試緊連線…"; ghRes.className = "mres";
+    var btn = $("ghSave"); btn.disabled = true;
+    withTimeout(fetch("https://api.github.com/repos/" + encodeURIComponent(o) + "/" + encodeURIComponent(r), {
+      cache:"no-store", headers:{ "Accept":"application/vnd.github+json", "Authorization":"Bearer " + t, "X-GitHub-Api-Version":"2022-11-28" }
+    }), 15000).then(function(res){
+      if (res.status === 401) throw { msg:"Token 唔啱或者過咗期。" };
+      if (res.status === 404 || res.status === 403) throw { msg:"搵唔到 " + o + "/" + r + "，或者個 token 冇呢個 repo 嘅權限。" };
+      if (!res.ok) throw { msg:"GitHub 出錯（" + res.status + "），等陣再試。" };
+      return res.json();
+    }).then(function(j){
+      var changedTarget = gh.owner !== o || gh.repo !== r;
+      gh = { owner:o, repo:r, token:t }; writeJSON(GH_KEY, gh);
+      if (changedTarget) { baseSha = null; tBaseSha = null; myShas = []; tShas = []; }
+      ghRes.textContent = "連到喇" + (j && j.private === false ? "（留意：呢個 repo 係公開嘅，最好改做 private）" : "") + "。";
+      ghRes.className = "mres ok";
+      setTimeout(closeSettings, j && j.private === false ? 2500 : 700);
+      tErr = ""; loaded = false; tLoaded = false; idleStatus(); tStatus();
+      syncAll();
+    }, function(e){
+      ghRes.textContent = (e && e.msg) || "連唔到 GitHub，檢查吓網絡。"; ghRes.className = "mres bad";
+    }).then(function(){ btn.disabled = false; });
+  };
+
+  function syncAll(){
+    if (!synced()) { idleStatus(); tStatus(); return; }
+    if (dirty && !conflict) { pullNotes().then(function(){ if (dirty && !conflict) save(); }); } else pullNotes();
+    tPull();
+  }
+
+  /* =====================================================================
+     tabs + keys + lifecycle
+     ===================================================================== */
+  var TAB_KEY = "hk-notes-tab-v1";
+  function readTab(){
+    var h = (location.hash || "").slice(1);
+    if (h === "todo" || h === "notes") return h;
+    try { var t = localStorage.getItem(TAB_KEY); if (t === "todo" || t === "notes") return t; } catch(e){}
+    return "notes";
+  }
+  function showTab(t){
+    if (t === tab) return;
+    if (tab) scrollMem[tab] = window.scrollY;
+    tab = t;
+    document.body.dataset.tab = t;
+    $("tabNotes").setAttribute("aria-selected", t === "notes" ? "true" : "false");
+    $("tabTodo").setAttribute("aria-selected", t === "todo" ? "true" : "false");
+    notesView.hidden = t !== "notes";
+    todoView.hidden = t !== "todo";
+    setSelItem(null);
+    try { localStorage.setItem(TAB_KEY, t); } catch(e){}
+    if ((location.hash || "").slice(1) !== t) { try { history.replaceState(null, "", "#" + t); } catch(e){ location.hash = t; } }
+    measureTop();
+    if (t === "notes") {
+      renderDecor();
+      var y = scrollMem.notes;
+      requestAnimationFrame(function(){ if (y == null) pageBottom(); else window.scrollTo(0, y); activeIdx = -2; spy(); });
+    } else {
+      renderTodos();
+      window.scrollTo(0, scrollMem.todo || 0);
+    }
+  }
+  $("tabNotes").onclick = function(){ showTab("notes"); };
+  $("tabTodo").onclick = function(){ showTab("todo"); };
+  window.addEventListener("hashchange", function(){
+    var h = (location.hash || "").slice(1);
+    if (h === "todo" || h === "notes") showTab(h);
+  });
+
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape" && !setModal.hidden) { closeSettings(); return; }
+    if (tab !== "notes" || e.target === vText || !setModal.hidden) return;
+    var mod = e.metaKey || e.ctrlKey, k = e.key;
+    if (!mod || e.altKey) return;
+    if (k === "s" || k === "S") { e.preventDefault(); clearTimeout(saveTimer); save(); }
+    else if (!e.shiftKey && (k === "b" || k === "B")) { e.preventDefault(); toggleHeading(document.activeElement === ed); }
+    else if (k === "z" || k === "Z") { e.preventDefault(); if (e.shiftKey) redo(true); else undo(true); }
+    else if (!e.shiftKey && (k === "y" || k === "Y")) { e.preventDefault(); redo(true); }
+    else if (document.activeElement === ed && (k === "i" || k === "I" || k === "u" || k === "U")) e.preventDefault();
+  });
+
+  var pollTimer = null;
+  function poll(){
+    clearTimeout(pollTimer);
+    if (document.visibilityState === "visible" && synced()) { pullNotes(); if (!tSaving) tPull(); }
+    pollTimer = setTimeout(poll, 45000);
+  }
+  document.addEventListener("visibilitychange", function(){
+    if (document.visibilityState === "hidden") {
+      writeCache(); tcacheSoon();
+      if (dirty && !conflict) { clearTimeout(saveTimer); save(); }
+      if (tDirty()) { clearTimeout(tTimer); tSave(); }
+    } else { poll(); renderTodos(); }
+  });
+  window.addEventListener("pagehide", function(){ writeCache(); writeJSON(TCACHE, { items:items, baseSha:tBaseSha, dirty:tDirty() }); });
+  window.addEventListener("online", function(){ tOffline = false; syncAll(); });
+
+  idleStatus(); tStatus();
+  showTab(readTab());
+  if (synced()) { syncAll(); pollTimer = setTimeout(poll, 45000); }
+  else setTimeout(openSettings, 400);
+})();
+</script>
+</body>
+</html>
